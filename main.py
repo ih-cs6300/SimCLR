@@ -7,6 +7,7 @@ import torch.optim as optim
 from thop import profile, clever_format
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from sklearn.model_selection import train_test_split
 
 import utils
 from model import Model
@@ -17,7 +18,7 @@ def train(net, data_loader, train_optimizer):
     net.train()
     total_loss, total_num, train_bar = 0.0, 0, tqdm(data_loader)
     for pos_1, pos_2, target in train_bar:
-        pos_1, pos_2 = pos_1.cuda(non_blocking=True), pos_2.cuda(non_blocking=True)
+        #pos_1, pos_2 = pos_1.cuda(non_blocking=True), pos_2.cuda(non_blocking=True)
         feature_1, out_1 = net(pos_1)
         feature_2, out_2 = net(pos_2)
         # [2*B, D]
@@ -51,7 +52,7 @@ def test(net, memory_data_loader, test_data_loader):
     with torch.no_grad():
         # generate feature bank
         for data, _, target in tqdm(memory_data_loader, desc='Feature extracting'):
-            feature, out = net(data.cuda(non_blocking=True))
+            feature, out = net(data)
             feature_bank.append(feature)
         # [D, N]
         feature_bank = torch.cat(feature_bank, dim=0).t().contiguous()
@@ -60,7 +61,7 @@ def test(net, memory_data_loader, test_data_loader):
         # loop test data to predict the label by weighted knn search
         test_bar = tqdm(test_data_loader)
         for data, _, target in test_bar:
-            data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
+            #data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
             feature, out = net(data)
 
             total_num += data.size(0)
@@ -101,18 +102,31 @@ if __name__ == '__main__':
     feature_dim, temperature, k = args.feature_dim, args.temperature, args.k
     batch_size, epochs = args.batch_size, args.epochs
 
+    # read in csv
+    all_df = pd.read_csv('/home/odd1/test/clevrer_shapes/shapes/all_ds.csv')
+    train_df, test_df = train_test_split(all_df, test_size = 0.30, random_state = 42)
+
+
     # data prepare
-    train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.train_transform, download=True)
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True,
-                              drop_last=True)
-    memory_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.test_transform, download=True)
-    memory_loader = DataLoader(memory_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
-    test_data = utils.CIFAR10Pair(root='data', train=False, transform=utils.test_transform, download=True)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
+    #train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.train_transform, download=True)
+    #train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True,
+    #                          drop_last=True)
+    train_data = utils.clevrer_dataset(train_df, root_dir='/home/odd1/test/clevrer_shapes/shapes', train=True, transform=utils.train_transform)
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True, drop_last=True)
+
+    #memory_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.test_transform, download=True)
+    #memory_loader = DataLoader(memory_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
+    memory_data = utils.clevrer_dataset(train_df, root_dir='/home/odd1/test/clevrer_shapes/shapes', train=True, transform=utils.test_transform)
+    memory_loader = DataLoader(memory_data, batch_size=batch_size, shuffle=False, num_workers=1, pin_memory=True)
+
+    #test_data = utils.CIFAR10Pair(root='data', train=False, transform=utils.test_transform, download=True)
+    #test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
+    test_data = utils.clevrer_dataset(test_df, root_dir='/home/odd1/test/clevrer_shapes/shapes', train=False, transform=utils.test_transform)
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=1, pin_memory=True)
 
     # model setup and optimizer config
-    model = Model(feature_dim).cuda()
-    flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
+    model = Model(feature_dim)
+    flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32),))
     flops, params = clever_format([flops, params])
     print('# Model Params: {} FLOPs: {}'.format(params, flops))
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-6)
