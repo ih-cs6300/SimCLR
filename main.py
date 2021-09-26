@@ -96,6 +96,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=512, type=int, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', default=500, type=int, help='Number of sweeps over the dataset to train')
 
+    #import pdb; pdb.set_trace()
+
     # args parse
     args = parser.parse_args()
     feature_dim, temperature, k = args.feature_dim, args.temperature, args.k

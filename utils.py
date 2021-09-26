@@ -8,6 +8,7 @@ class CIFAR10Pair(CIFAR10):
     """
 
     def __getitem__(self, index):
+        import pdb; pdb.set_trace()
         img, target = self.data[index], self.targets[index]
         img = Image.fromarray(img)
 
