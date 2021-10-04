@@ -20,7 +20,9 @@ pip install thop
 ## Usage
 ### Train SimCLR
 ```
-python main.py --batch_size 1024 --epochs 1000 
+srun -p gpu --gpus=a100:1 --cpus-per-task=2 --mem=32gb --time=06:00:00  --pty -u bash -i
+ml git pytorch # pytorch version 1.9.0
+python main.py --batch_size 1024 --epochs 1000 --k 1
 optional arguments:
 --feature_dim                 Feature dim for latent vector [default value is 128]
 --temperature                 Temperature used in softmax [default value is 0.5]

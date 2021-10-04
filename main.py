@@ -10,6 +10,32 @@ from tqdm import tqdm
 
 import utils
 from model import Model
+from sklearn.model_selection import train_test_split
+
+from sklearn.manifold import TSNE
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+def plot_tsne(net, test_data_loader):
+    net.eval()
+    img_tensors = []
+    targets = []
+    for i in range(1000):
+        img1, img2, target = test_data_loader.dataset[i]
+        img1, img2 = img1.cuda(non_blocking=True), img2.cuda(non_blocking=True)
+        img_tensors.append(img1)
+        targets.append(target)
+        tsne_batch = torch.stack(img_tensors, dim=0)
+    feature, out = net(tsne_batch)
+
+    sns.set(rc={'figure.figsize': (11.7, 8.27)})
+    palette = sns.color_palette("bright", 10)
+    tsne = TSNE(random_state=42)
+    X_embedded = tsne.fit_transform(feature.detach().cpu().numpy())
+    targets = [["cube", "cylinder", "sphere"][x] for _, _, x in test_data_loader.dataset]
+    sns.scatterplot(x=X_embedded[:, 0], y=X_embedded[:, 1], hue=targets[:1000])
+    #plt.show()
+    plt.savefig('clusters.png')
 
 
 # train for one epoch to learn unique features
@@ -45,7 +71,7 @@ def train(net, data_loader, train_optimizer):
 
 
 # test for one epoch, use weighted knn to find the most similar images' label to assign the test image
-def test(net, memory_data_loader, test_data_loader):
+def test(net, memory_data_loader, test_data_loader, epoch):
     net.eval()
     total_top1, total_top5, total_num, feature_bank = 0.0, 0.0, 0, []
     with torch.no_grad():
@@ -65,11 +91,18 @@ def test(net, memory_data_loader, test_data_loader):
 
             total_num += data.size(0)
             # compute cos similarity between each feature vector and feature bank ---> [B, N]
-            sim_matrix = torch.mm(feature, feature_bank)
+            # modify KNN so that it only has 3 examples: 1 example for each shape
+            # labels: 0 = cube, 1 = cylinder, 2 = sphere
+            cubes_idx = torch.where(feature_labels == 0)[0].tolist()
+            cylinder_idx = torch.where(feature_labels == 1)[0].tolist()
+            sphere_idx = torch.where(feature_labels == 2)[0].tolist()
+
+            sim_matrix = torch.mm(feature, feature_bank[:, [cubes_idx[0], cylinder_idx[5], sphere_idx[22]]])
+
             # [B, K]
             sim_weight, sim_indices = sim_matrix.topk(k=k, dim=-1)
             # [B, K]
-            sim_labels = torch.gather(feature_labels.expand(data.size(0), -1), dim=-1, index=sim_indices)
+            sim_labels = torch.gather(feature_labels[[cubes_idx[0], cylinder_idx[5], sphere_idx[22]]].expand(data.size(0), -1), dim=-1, index=sim_indices)
             sim_weight = (sim_weight / temperature).exp()
 
             # counts for each class
@@ -82,8 +115,9 @@ def test(net, memory_data_loader, test_data_loader):
             pred_labels = pred_scores.argsort(dim=-1, descending=True)
             total_top1 += torch.sum((pred_labels[:, :1] == target.unsqueeze(dim=-1)).any(dim=-1).float()).item()
             total_top5 += torch.sum((pred_labels[:, :5] == target.unsqueeze(dim=-1)).any(dim=-1).float()).item()
-            test_bar.set_description('Test Epoch: [{}/{}] Acc@1:{:.2f}% Acc@5:{:.2f}%'
-                                     .format(epoch, epochs, total_top1 / total_num * 100, total_top5 / total_num * 100))
+            test_bar.set_description('Test Epoch: [{}/{}] Acc@1:{:.2f}% Acc@5:{:.2f}%'.format(epoch, epochs, total_top1 / total_num * 100, total_top5 / total_num * 100))
+    if (epoch == 5):
+       plot_tsne(net, test_data_loader)
 
     return total_top1 / total_num * 100, total_top5 / total_num * 100
 
@@ -96,21 +130,27 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=512, type=int, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', default=500, type=int, help='Number of sweeps over the dataset to train')
 
-    #import pdb; pdb.set_trace()
-
     # args parse
     args = parser.parse_args()
     feature_dim, temperature, k = args.feature_dim, args.temperature, args.k
     batch_size, epochs = args.batch_size, args.epochs
 
+    # read in csv
+    all_df = pd.read_csv('/home/iharmon1/data/clevrer_shapes/shapes/all_ds.csv')
+    train_df, test_df = train_test_split(all_df, test_size = 0.30, random_state = 42)
+
     # data prepare
-    train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.train_transform, download=True)
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True,
-                              drop_last=True)
-    memory_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.test_transform, download=True)
-    memory_loader = DataLoader(memory_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
-    test_data = utils.CIFAR10Pair(root='data', train=False, transform=utils.test_transform, download=True)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
+    #train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.train_transform, download=True)
+    train_data = utils.clevrer_dataset(train_df, root_dir='/home/iharmon1/data/clevrer_shapes/shapes', train=True, transform=utils.train_transform)     
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True,drop_last=True)
+
+    #memory_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.test_transform, download=True)
+    memory_data = utils.clevrer_dataset(train_df, root_dir='/home/iharmon1/data/clevrer_shapes/shapes', train=True, transform=utils.test_transform)
+    memory_loader = DataLoader(memory_data, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+    #test_data = utils.CIFAR10Pair(root='data', train=False, transform=utils.test_transform, download=True)
+    test_data = utils.clevrer_dataset(test_df, root_dir='/home/iharmon1/data/clevrer_shapes/shapes', train=False, transform=utils.test_transform)
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     # model setup and optimizer config
     model = Model(feature_dim).cuda()
@@ -129,7 +169,7 @@ if __name__ == '__main__':
     for epoch in range(1, epochs + 1):
         train_loss = train(model, train_loader, optimizer)
         results['train_loss'].append(train_loss)
-        test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
+        test_acc_1, test_acc_5 = test(model, memory_loader, test_loader, epoch)
         results['test_acc@1'].append(test_acc_1)
         results['test_acc@5'].append(test_acc_5)
         # save statistics
@@ -138,3 +178,4 @@ if __name__ == '__main__':
         if test_acc_1 > best_acc:
             best_acc = test_acc_1
             torch.save(model.state_dict(), 'results/{}_model.pth'.format(save_name_pre))
+
