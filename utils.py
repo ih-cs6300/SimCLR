@@ -30,12 +30,12 @@ train_transform = transforms.Compose([
     transforms.RandomGrayscale(p=0.2),
     transforms.ToTensor(),
     #transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])]) # for cifar-10
-    transforms.Normalize([0.38334954 0.3791455 0.3679523], [0.13129857 0.12903619 0.14591834])])
+    transforms.Normalize([0.38334954, 0.3791455, 0.3679523], [0.13129857, 0.12903619, 0.14591834])])
 
 test_transform = transforms.Compose([
     transforms.ToTensor(),
     #transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])]) # for cifar-10
-    transforms.Normalize([0.38334954 0.3791455 0.3679523], [0.13129857 0.12903619 0.14591834])])
+    transforms.Normalize([0.38334954, 0.3791455, 0.3679523], [0.13129857, 0.12903619, 0.14591834])])
     
     
 
