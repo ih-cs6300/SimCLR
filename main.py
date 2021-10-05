@@ -91,18 +91,36 @@ def test(net, memory_data_loader, test_data_loader, epoch):
             total_num += data.size(0)
             # compute cos similarity between each feature vector and feature bank ---> [B, N]
 
-            # modify KNN so that it only has 3 examples: 1 example for each shape
+            # modify KNN to vary number of examples used for training
             # labels: 0 = cube, 1 = cylinder, 2 = sphere
-            cubes_idx = torch.where(feature_labels == 0)[0].tolist()
-            cylinder_idx = torch.where(feature_labels == 1)[0].tolist()
-            sphere_idx = torch.where(feature_labels == 2)[0].tolist()
 
-            sim_matrix = torch.mm(feature, feature_bank[:, [cubes_idx[0], cylinder_idx[5], sphere_idx[22]]])
+            torch.random.manual_seed(42)
+
+            cubes_idx = torch.where(feature_labels == 0)[0]
+            cubes_idx = cubes_idx[torch.randperm(cubes_idx.size()[0])].tolist()
+
+            cylinder_idx = torch.where(feature_labels == 1)[0]
+            cylinder_idx = cylinder_idx[torch.randperm(cylinder_idx.size()[0])].tolist()
+
+            sphere_idx = torch.where(feature_labels == 2)[0]
+            sphere_idx = sphere_idx[torch.randperm(sphere_idx.size()[0])].tolist()
+
+            #make sure there are enough of each class for the number of shots requested
+            assert nshots <= min(len(cubes_idx), len(cylinder_idx), len(sphere_idx)), "Too few of one label type for {} shots".format(nshots)
+
+            if (nshots != -1):
+                ind = cubes_idx[:nshots] + cylinder_idx[:nshots] + sphere_idx[:nshots]
+                sim_matrix = torch.mm(feature, feature_bank[:, ind])
+            else:
+                sim_matrix = torch.mm(feature, feature_bank)
 
             # [B, K]
             sim_weight, sim_indices = sim_matrix.topk(k=k, dim=-1)
             # [B, K]
-            sim_labels = torch.gather(feature_labels[[cubes_idx[0], cylinder_idx[5], sphere_idx[22]]].expand(data.size(0), -1), dim=-1, index=sim_indices)
+            if (nshots != -1):
+                sim_labels = torch.gather(feature_labels[ind].expand(data.size(0), -1), dim=-1, index=sim_indices)
+            else:
+                sim_labels = torch.gather(feature_labels.expand(data.size(0), -1), dim=-1, index=sim_indices)
             sim_weight = (sim_weight / temperature).exp()
 
             # counts for each class
@@ -129,16 +147,26 @@ if __name__ == '__main__':
     parser.add_argument('--k', default=200, type=int, help='Top k most similar images used to predict the label')
     parser.add_argument('--batch_size', default=512, type=int, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', default=500, type=int, help='Number of sweeps over the dataset to train')
+    parser.add_argument('--nshots', default=-1, type=int, help='Number of training instances for KNN')
+    parser.add_argument('--train_size', default=-1, type=int, help='Training set size')
 
     # args parse
     args = parser.parse_args()
     feature_dim, temperature, k = args.feature_dim, args.temperature, args.k
     batch_size, epochs = args.batch_size, args.epochs
+    train_size = args.train_size
+    nshots = args.nshots
 
     # read in csv
     all_df = pd.read_csv('/home/odd1/test/clevrer_shapes/shapes/all_ds.csv')
     train_df, test_df = train_test_split(all_df, test_size = 0.30, random_state = 42)
 
+    # clip training data to selected size
+    if args.train_size != -1:
+        assert train_df.shape[0] >=train_size, "train_size dataset-size mismatch"
+        torch.random.manual_seed(42)
+        ind = torch.randperm(train_df.shape[0])[:train_size].tolist()
+        train_df = train_df.iloc[ind, :]
 
     # data prepare
     #train_data = utils.CIFAR10Pair(root='data', train=True, transform=utils.train_transform, download=True)
